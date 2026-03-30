@@ -5,7 +5,6 @@ extends ScrollContainer
 
 
 signal asset_selected(path: String)
-signal asset_drag_started(path: String)
 
 const PREVIEW_MAX_IN_FLIGHT := 4
 const PREVIEW_RETRY_MAX     := 4
@@ -54,7 +53,6 @@ func set_paths(paths: PackedStringArray) -> void:
 		var card := PlonkThumbnailCard.new()
 		card.configure(id, p, _card_size_px)
 		card.card_pressed.connect(_on_card_pressed)
-		card.card_drag_started.connect(_on_card_drag_started)
 		_grid.add_child(card)
 		_cards[id] = card
 		_preview_backlog.append({ "id": id, "path": p, "retries": 0 })
@@ -143,14 +141,6 @@ func _on_card_pressed(card_id: String) -> void:
 	var path: String = _path_by_id[card_id]
 	set_active_path(path)
 	asset_selected.emit(path)
-
-
-func _on_card_drag_started(card_id: String) -> void:
-	if not _path_by_id.has(card_id):
-		return
-	var path: String = _path_by_id[card_id]
-	set_active_path(path)
-	asset_drag_started.emit(path)
 
 
 func _gui_input(event: InputEvent) -> void:

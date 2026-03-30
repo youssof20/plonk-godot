@@ -5,7 +5,6 @@ extends Control
 
 
 signal asset_selected(path: String)
-signal asset_drag_started(path: String)
 signal folder_changed(path: String)
 signal dock_settings_changed
 signal zoo_requested
@@ -231,8 +230,7 @@ func _build_ui() -> void:
 	_browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_browser.custom_minimum_size = Vector2(0, 180 * editor_scale)
 	_browser.asset_selected.connect(_on_asset_selected)
-	_browser.asset_drag_started.connect(_on_asset_drag_started)
-	_browser.tooltip_text = "Click a card to pick the asset, then click in the 3D view to place. Optional: drag slightly off the card first, then release in the viewport to place on release (avoids accidental stamps while picking)."
+	_browser.tooltip_text = "Click a thumbnail to pick an asset, then click in the 3D view to place it."
 	_root_v.add_child(_browser)
 	_add_section("Placement")
 	_add_label("Placement mode")
@@ -428,10 +426,6 @@ func _on_search_changed(t: String) -> void:
 
 func _on_asset_selected(path: String) -> void:
 	asset_selected.emit(path)
-
-
-func _on_asset_drag_started(path: String) -> void:
-	asset_drag_started.emit(path)
 
 
 ## Updates the browser highlight for the active asset path.

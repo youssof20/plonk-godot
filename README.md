@@ -19,7 +19,7 @@ vertex alignment, paint mode, and MultiMesh support built in.
 ## Quick start (mental model)
 
 1. **Library** — Set the asset folder (Browse…), optionally narrow formats and use search.
-2. **Pick** — Click a thumbnail (or drag it to place on mouse release in the 3D view).
+2. **Pick** — Click a thumbnail to select the asset (ghost appears).
 3. **Place** — Click in the viewport to stamp; **ESC** cancels; **RMB** ends placement.
 4. **Refine** — Choose placement mode, randomisation, paint, collision, or material override as needed.
 
