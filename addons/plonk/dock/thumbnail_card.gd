@@ -83,13 +83,13 @@ func _on_gui_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_lmb_held   = true
+				_lmb_held    = true
 				_drag_active = false
 				_drag_start  = mb.position
+				# Press picks the asset immediately (release is unreliable if cursor leaves the card).
+				card_pressed.emit(card_id)
 			else:
 				_lmb_held = false
-				if not _drag_active:
-					card_pressed.emit(card_id)
 				_drag_active = false
 	elif event is InputEventMouseMotion:
 		if _lmb_held and not _drag_active:

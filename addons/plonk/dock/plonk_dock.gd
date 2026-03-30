@@ -5,6 +5,7 @@ extends Control
 
 
 signal asset_selected(path: String)
+signal asset_drag_started(path: String)
 signal folder_changed(path: String)
 signal dock_settings_changed
 signal zoo_requested
@@ -391,8 +392,13 @@ func _on_asset_selected(path: String) -> void:
 
 
 func _on_asset_drag_started(path: String) -> void:
-	# Treated exactly like a click — ghost appears immediately and follows cursor.
-	asset_selected.emit(path)
+	asset_drag_started.emit(path)
+
+
+## Updates the browser highlight for the active asset path.
+func set_active_asset_path(path: String) -> void:
+	if _browser:
+		_browser.set_active_path(path)
 
 
 func _all_formats(on: bool) -> void:

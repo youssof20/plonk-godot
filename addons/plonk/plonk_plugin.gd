@@ -27,17 +27,31 @@ func _enter_tree() -> void:
 	_dock = dock_scene.instantiate() as PlonkDock
 	add_control_to_dock(DOCK_SLOT_LEFT_UL, _dock)
 	_dock.asset_selected.connect(_on_asset_selected)
+	_dock.asset_drag_started.connect(_on_asset_drag_started)
 	_dock.zoo_requested.connect(_on_zoo_requested)
 	_dock.dock_settings_changed.connect(_sync_from_dock)
 	if not _editor.scene_changed.is_connected(_on_scene_changed):
 		_editor.scene_changed.connect(_on_scene_changed)
 	set_process(true)
+	set_process_input(true)
+
+
+func _input(event: InputEvent) -> void:
+	# Drag-to-place: release may happen over the dock (3D forward never sees it).
+	if not _placement_active or not _drag_placing:
+		return
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			_drag_placing = false
+			_commit_placement()
 
 
 func _exit_tree() -> void:
 	if _editor:
 		if _editor.scene_changed.is_connected(_on_scene_changed):
 			_editor.scene_changed.disconnect(_on_scene_changed)
+	set_process_input(false)
 	_end_placement()
 	_mm.clear()
 	if _dock:
@@ -74,11 +88,6 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 					_stamp_paint_or_place()
 			else:
 				if mb.pressed and not _drag_placing:
-					# Normal click → place on press
-					_commit_placement()
-				elif not mb.pressed and _drag_placing:
-					# Drag-and-drop → place on release
-					_drag_placing = false
 					_commit_placement()
 			return AFTER_GUI_INPUT_STOP
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
@@ -119,10 +128,9 @@ func _on_asset_selected(path: String) -> void:
 	_begin_placement()
 
 
-func _on_asset_drag_started(path: String) -> void:
-	_asset_path    = path
-	_drag_placing  = true
-	_begin_placement()
+func _on_asset_drag_started(_path: String) -> void:
+	# Pick already ran on mouse-down; only mark drag so placement commits on LMB release.
+	_drag_placing = true
 
 
 func _on_scene_changed() -> void:
@@ -151,7 +159,7 @@ func _begin_placement() -> void:
 	_ghost.spawn(root, _asset_path)
 	_sync_from_dock()
 	if _dock:
-		_dock._browser.set_active_path(_asset_path)
+		_dock.set_active_asset_path(_asset_path)
 
 
 func _end_placement() -> void:
