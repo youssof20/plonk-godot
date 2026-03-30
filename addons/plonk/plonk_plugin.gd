@@ -98,8 +98,15 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 				if mb.pressed:
 					_stamp_paint_or_place()
 			else:
-				if mb.pressed and not _drag_placing:
-					_commit_placement()
+				if mb.pressed:
+					if not _drag_placing:
+						_commit_placement()
+				else:
+					# Drag-from-dock: release must commit here — forward consumes the event so
+					# EditorPlugin._input often never sees LMB release over the 3D viewport.
+					if _drag_placing:
+						_drag_placing = false
+						_commit_placement()
 			return AFTER_GUI_INPUT_STOP
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_drag_placing = false

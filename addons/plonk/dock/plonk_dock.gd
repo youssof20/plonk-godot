@@ -232,7 +232,7 @@ func _build_ui() -> void:
 	_browser.custom_minimum_size = Vector2(0, 180 * editor_scale)
 	_browser.asset_selected.connect(_on_asset_selected)
 	_browser.asset_drag_started.connect(_on_asset_drag_started)
-	_browser.tooltip_text = "Click a card to pick; drag a card to place on mouse release in the viewport."
+	_browser.tooltip_text = "Click a card to pick the asset, then click in the 3D view to place. Optional: drag slightly off the card first, then release in the viewport to place on release (avoids accidental stamps while picking)."
 	_root_v.add_child(_browser)
 	_add_section("Placement")
 	_add_label("Placement mode")
