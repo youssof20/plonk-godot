@@ -339,7 +339,6 @@ func _do_place(
 		shape_kind as PlonkCollisionBuilder.ShapeKind
 	)
 	wrapped.name = "%s%d" % [PLACEMENT_NAME_PREFIX, pid]
-	var edited := _editor.get_edited_scene_root()
 	if edited:
 		_set_owner_recursive(wrapped, edited)
 	_apply_material_override(wrapped)

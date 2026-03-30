@@ -7,3 +7,12 @@ export_presets.cfg
 # OS
 .DS_Store
 Thumbs.db
+
+# Test assets — not part of the plugin
+GLB (recommended)/
+*.glb
+*.gltf
+*.fbx
+*.obj
+*.dae
+*.blend
