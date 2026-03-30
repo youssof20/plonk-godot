@@ -60,9 +60,8 @@ func _process(delta: float) -> void:
 		return
 	_sync_from_dock()
 	_apply_continuous_keys(delta)
+	# root3 may be null for non-Node3D scene roots; update_ghost handles null gracefully.
 	var root3 := _editor.get_edited_scene_root() as Node3D
-	if root3 == null:
-		return
 	_pm.update_ghost(_ghost, _last_camera, _last_mouse, root3)
 	if _paint_holding and _dock.is_paint_enabled():
 		_stamp_paint_or_place()
@@ -74,6 +73,11 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 	if event is InputEventMouse:
 		_last_mouse = (event as InputEventMouse).position
 		update_overlays()
+	# Debug: log LMB presses so we can diagnose if input is reaching the plugin.
+	if event is InputEventMouseButton:
+		var _mb := event as InputEventMouseButton
+		if _mb.button_index == MOUSE_BUTTON_LEFT and _mb.pressed:
+			print("[Plonk] 3D LMB received — placement_active=", _placement_active, " erase=", _dock.is_erase_mode() if _dock else "no-dock")
 
 	# ── Erase mode: LMB erases nearest PlonkInst ──────────────────────────────
 	if _dock and _dock.is_erase_mode():
@@ -111,7 +115,7 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 				if mb.pressed:
 					_stamp_paint_or_place()
 			elif mb.pressed:
-				# Alt+click: place AND select the new node.
+				print("[Plonk] LMB pressed — calling _commit_placement. placement_active=", _placement_active, " ghost=", _ghost.has_ghost())
 				_commit_placement(mb.alt_pressed)
 			return AFTER_GUI_INPUT_STOP
 
@@ -339,24 +343,28 @@ func _apply_continuous_keys(delta: float) -> void:
 # ── Placement ─────────────────────────────────────────────────────────────────
 
 func _commit_placement(select_after: bool = false) -> void:
+	print("[Plonk] _commit_placement called. asset='", _asset_path, "' active=", _placement_active)
 	var root_node := _editor.get_edited_scene_root()
 	if root_node == null:
+		push_error("[Plonk] _commit_placement: no edited scene root")
 		return
-	# Force a ghost position update right now — _process may not have ticked yet
-	# (e.g. first click after picking an asset without moving the mouse first).
+	# Force a ghost position update right now — _process may not have ticked yet.
 	if _last_camera != null:
-		var root3 := root_node as Node3D
-		if root3:
-			_pm.update_ghost(_ghost, _last_camera, _last_mouse, root3)
+		var root3 := root_node as Node3D  # null if root isn't Node3D — handled gracefully
+		_pm.update_ghost(_ghost, _last_camera, _last_mouse, root3)
 	if not _ghost.has_ghost():
+		push_error("[Plonk] _commit_placement: ghost missing — cannot place")
 		return
 	if not _passes_slope_filter():
+		push_error("[Plonk] _commit_placement: slope filter blocked placement")
 		return
 	var parent := _resolve_parent_node()
 	if parent == null:
+		push_error("[Plonk] _commit_placement: parent node is null")
 		return
 	var gr := _ghost.get_root()
 	if gr == null:
+		push_error("[Plonk] _commit_placement: ghost root is null")
 		return
 	var xf := gr.global_transform
 	xf = _apply_randomisation(xf)
@@ -466,14 +474,17 @@ func _do_place(
 		if node is Node3D:
 			inst = node as Node3D
 	if inst == null:
+		push_error("[Plonk] _do_place: instantiation failed for " + asset_path)
 		return
+	print("[Plonk] _do_place: placing '", asset_path.get_file(), "' at ", xf.origin)
 	inst.name = "PlonkVisual"
-	inst.global_transform = xf
+	# Set transform AFTER parenting so global_transform is resolved correctly.
 	var wrapped := PlonkCollisionBuilder.wrap(
 		inst, parent,
 		body_kind as PlonkCollisionBuilder.BodyKind,
 		shape_kind as PlonkCollisionBuilder.ShapeKind
 	)
+	wrapped.global_transform = xf
 	wrapped.name = "%s%d" % [PLACEMENT_NAME_PREFIX, pid]
 	if edited:
 		_set_owner_recursive(wrapped, edited)

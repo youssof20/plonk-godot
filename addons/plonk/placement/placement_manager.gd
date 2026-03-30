@@ -118,6 +118,8 @@ func _transform_vertex(
 	fallback_plane_y: float
 ) -> Transform3D:
 	var base := _transform_surface(ghost, camera, mouse_pos, edited_root, fallback_plane_y)
+	if edited_root == null:
+		return base
 	ghost.set_world_transform(base)
 	var wa := ghost.get_world_aabb()
 	var gc := PlonkModeVertex.corners_from_aabb(wa)
