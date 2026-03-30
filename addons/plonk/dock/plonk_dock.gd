@@ -156,10 +156,15 @@ func bump_grid_layer(delta: int) -> void:
 
 func _build_ui() -> void:
 	var m := BASE_MARGIN * editor_scale
+	# Outer scroll so the whole dock is scrollable when the panel is short
+	var outer_scroll := ScrollContainer.new()
+	outer_scroll.set_anchors_preset(PRESET_FULL_RECT)
+	outer_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	add_child(outer_scroll)
 	_root_v = VBoxContainer.new()
-	_root_v.set_anchors_preset(PRESET_FULL_RECT)
+	_root_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root_v.add_theme_constant_override("separation", int(m))
-	add_child(_root_v)
+	outer_scroll.add_child(_root_v)
 	_add_label("Parent node (NodePath from scene root)")
 	_parent_edit = LineEdit.new()
 	_parent_edit.placeholder_text = "."
@@ -206,8 +211,9 @@ func _build_ui() -> void:
 	_search.text_changed.connect(_on_search_changed)
 	_root_v.add_child(_search)
 	_browser = PlonkThumbnailBrowser.new()
+	_browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_browser.custom_minimum_size = Vector2(0, 200 * editor_scale)
+	_browser.custom_minimum_size = Vector2(0, 180 * editor_scale)
 	_browser.asset_selected.connect(_on_asset_selected)
 	_root_v.add_child(_browser)
 	_add_label("Placement mode")
