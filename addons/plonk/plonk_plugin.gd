@@ -28,6 +28,7 @@ func _enter_tree() -> void:
 	_dock.asset_selected.connect(_on_asset_selected)
 	_dock.zoo_requested.connect(_on_zoo_requested)
 	_dock.dock_settings_changed.connect(_sync_from_dock)
+	_dock.placement_cancelled.connect(_end_placement)
 	if not _editor.scene_changed.is_connected(_on_scene_changed):
 		_editor.scene_changed.connect(_on_scene_changed)
 	set_process(true)
@@ -158,6 +159,7 @@ func _begin_placement() -> void:
 	_sync_from_dock()
 	if _dock:
 		_dock.set_active_asset_path(_asset_path)
+		_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled())
 
 
 func _end_placement() -> void:
@@ -165,6 +167,8 @@ func _end_placement() -> void:
 	_paint_holding    = false
 	_paint.end_stroke()
 	_ghost.clear()
+	if _dock:
+		_dock.set_placement_status("", false)
 
 
 func _sync_from_dock() -> void:
@@ -176,6 +180,8 @@ func _sync_from_dock() -> void:
 	_pm.vertex_threshold = PlonkSettingsManager.get_float(PlonkSettingsManager.KEY_VERTEX_THRESHOLD, 0.2)
 	_paint.spacing = _dock.get_paint_spacing()
 	_paint.scatter_radius = _dock.get_scatter_radius()
+	if _placement_active and _dock:
+		_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled())
 
 
 func _handle_hotkey(ev: InputEventKey) -> bool:

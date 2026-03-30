@@ -8,6 +8,7 @@ signal asset_selected(path: String)
 signal folder_changed(path: String)
 signal dock_settings_changed
 signal zoo_requested
+signal placement_cancelled
 
 const EXTENSIONS: PackedStringArray = [
 	"glb", "gltf", "fbx", "obj", "dae", "blend", "tscn", "scn", "res", "mesh"
@@ -48,6 +49,11 @@ var _format_checks: Dictionary = {}
 var _folder_dialog: EditorFileDialog
 
 var _scanned_paths: PackedStringArray = []
+
+## Status banner — shown at the very top when placement is active.
+var _status_bar: PanelContainer
+var _status_label: Label
+var _cancel_btn: Button
 
 
 func _ready() -> void:
@@ -156,22 +162,48 @@ func bump_grid_layer(delta: int) -> void:
 
 func _build_ui() -> void:
 	var m := BASE_MARGIN * editor_scale
-	# Outer scroll so the whole dock is scrollable when the panel is short
+	# Root VBox fills the whole dock; status bar at top, then scrollable content.
+	var dock_v := VBoxContainer.new()
+	dock_v.set_anchors_preset(PRESET_FULL_RECT)
+	add_child(dock_v)
+
+	# ── Status banner ──────────────────────────────────────────────────────────
+	_status_bar = PanelContainer.new()
+	_status_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_bar.visible = false
+	var bar_style := StyleBoxFlat.new()
+	bar_style.bg_color = Color(0.14, 0.56, 0.25, 0.92)
+	bar_style.set_corner_radius_all(4)
+	bar_style.content_margin_left = 8
+	bar_style.content_margin_right = 6
+	bar_style.content_margin_top = 5
+	bar_style.content_margin_bottom = 5
+	_status_bar.add_theme_stylebox_override("panel", bar_style)
+	var bar_row := HBoxContainer.new()
+	bar_row.add_theme_constant_override("separation", 6)
+	_status_label = Label.new()
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_label.clip_text = true
+	_status_label.add_theme_font_size_override("font_size", int(BASE_FONT_PX * editor_scale))
+	_cancel_btn = Button.new()
+	_cancel_btn.text = "Cancel (ESC)"
+	_cancel_btn.add_theme_font_size_override("font_size", int((BASE_FONT_PX - 1) * editor_scale))
+	_cancel_btn.pressed.connect(func() -> void: placement_cancelled.emit())
+	bar_row.add_child(_status_label)
+	bar_row.add_child(_cancel_btn)
+	_status_bar.add_child(bar_row)
+	dock_v.add_child(_status_bar)
+
+	# ── Scrollable content ─────────────────────────────────────────────────────
 	var outer_scroll := ScrollContainer.new()
-	outer_scroll.set_anchors_preset(PRESET_FULL_RECT)
+	outer_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	outer_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(outer_scroll)
+	dock_v.add_child(outer_scroll)
+
 	_root_v = VBoxContainer.new()
 	_root_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root_v.add_theme_constant_override("separation", int(m))
 	outer_scroll.add_child(_root_v)
-	var quick := Label.new()
-	quick.text = "Quick start: set folder → click a thumbnail → click in the 3D view to place. ESC cancels. Ctrl+scroll on thumbnails resizes cards; Alt+scroll in the viewport nudges height."
-	quick.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	quick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	quick.add_theme_font_size_override("font_size", int(BASE_FONT_PX * editor_scale))
-	quick.tooltip_text = "Short mental model: pick source, pick asset, stamp in scene. Everything else is optional refinement."
-	_root_v.add_child(quick)
 	_add_section("Library")
 	_add_label("Parent node (NodePath from scene root)")
 	_parent_edit = LineEdit.new()
@@ -432,6 +464,16 @@ func _on_asset_selected(path: String) -> void:
 func set_active_asset_path(path: String) -> void:
 	if _browser:
 		_browser.set_active_path(path)
+
+
+## Shows or hides the status banner. Pass empty string to clear (hide).
+func set_placement_status(asset_name: String, is_paint: bool) -> void:
+	if asset_name.is_empty():
+		_status_bar.visible = false
+		return
+	var mode_hint := " — hold LMB to paint" if is_paint else " — click scene to place, RMB/ESC to cancel"
+	_status_label.text = "Placing: %s%s" % [asset_name, mode_hint]
+	_status_bar.visible = true
 
 
 func _all_formats(on: bool) -> void:
