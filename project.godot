@@ -1,0 +1,16 @@
+; Minimal Godot project for developing / testing the Plonk addon.
+; Open this folder in Godot 4.1+ and enable the plugin under Project Settings.
+
+config_version=5
+
+[application]
+
+config/name="plonk-godot"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/plonk/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
