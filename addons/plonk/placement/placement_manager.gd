@@ -23,6 +23,13 @@ var user_scale: Vector3 = Vector3.ONE
 var flip_x: bool = false
 var flip_z: bool = false
 
+## Last vertex snap pair for viewport overlay (set during update_ghost in vertex mode).
+var _last_vertex_gizmo: Dictionary = { "ok": false }
+
+
+func get_last_vertex_gizmo() -> Dictionary:
+	return _last_vertex_gizmo.duplicate()
+
 
 ## Updates ghost transform from camera and mouse position.
 func update_ghost(
@@ -33,6 +40,7 @@ func update_ghost(
 ) -> void:
 	if not ghost.has_ghost():
 		return
+	_last_vertex_gizmo = { "ok": false }
 	var plane_y := height_offset + float(grid_layer) * grid_size
 	var t: Transform3D
 	match mode:
@@ -117,6 +125,7 @@ func _transform_vertex(
 	var snap := PlonkModeVertex.find_snap(gc, sc, vertex_threshold)
 	if not bool(snap.get("ok", false)):
 		return base
+	_last_vertex_gizmo = snap.duplicate()
 	var delta: Vector3 = snap.delta
 	var t := base
 	t.origin += delta

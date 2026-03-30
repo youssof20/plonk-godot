@@ -16,6 +16,15 @@ vertex alignment, paint mode, and MultiMesh support built in.
 2. Project → Project Settings → Plugins → Enable **Plonk**.
 3. The Plonk dock appears on the left panel.
 
+## Quick start (mental model)
+
+1. **Library** — Set the asset folder (Browse…), optionally narrow formats and use search.
+2. **Pick** — Click a thumbnail (or drag it to place on mouse release in the 3D view).
+3. **Place** — Click in the viewport to stamp; **ESC** cancels; **RMB** ends placement.
+4. **Refine** — Choose placement mode, randomisation, paint, collision, or material override as needed.
+
+Thumbnails load lazily so big folders stay usable. **Ctrl+scroll** over the thumbnail grid changes card size. **Alt+scroll** in the 3D view nudges **height offset** (hold **Shift** for larger steps).
+
 ## Placement modes
 
 | Mode | How it works |
@@ -24,6 +33,10 @@ vertex alignment, paint mode, and MultiMesh support built in.
 | Grid | Snaps to a configurable XZ grid with a live overlay |
 | Surface | Raycasts onto any physics surface, seats flush |
 | Vertex | Corner-to-corner snap like Blender |
+
+When vertex snap locks, a **cyan line** links the matching ghost corner to the scene corner in the viewport.
+
+**MultiMesh paint** batches instances for performance; it does **not** auto-generate per-instance collision bodies (use single placement + collision, or add bodies manually).
 
 ## License
 

@@ -166,13 +166,23 @@ func _build_ui() -> void:
 	_root_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root_v.add_theme_constant_override("separation", int(m))
 	outer_scroll.add_child(_root_v)
+	var quick := Label.new()
+	quick.text = "Quick start: set folder → click a thumbnail → click in the 3D view to place. ESC cancels. Ctrl+scroll on thumbnails resizes cards; Alt+scroll in the viewport nudges height."
+	quick.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	quick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	quick.add_theme_font_size_override("font_size", int(BASE_FONT_PX * editor_scale))
+	quick.tooltip_text = "Short mental model: pick source, pick asset, stamp in scene. Everything else is optional refinement."
+	_root_v.add_child(quick)
+	_add_section("Library")
 	_add_label("Parent node (NodePath from scene root)")
 	_parent_edit = LineEdit.new()
 	_parent_edit.placeholder_text = "."
 	_parent_edit.text_changed.connect(_on_any_setting_changed)
+	_parent_edit.tooltip_text = "Empty or \".\" = scene root. Example: Props/Furniture places under that child node."
 	_root_v.add_child(_parent_edit)
 	var zoo_btn := Button.new()
 	zoo_btn.text = "Create Asset Zoo"
+	zoo_btn.tooltip_text = "Arranges every scanned asset in a grid under the parent so you can compare scale and style at a glance."
 	zoo_btn.pressed.connect(func () -> void: zoo_requested.emit())
 	_root_v.add_child(zoo_btn)
 	_add_label("Asset folder")
@@ -180,8 +190,10 @@ func _build_ui() -> void:
 	_folder_edit = LineEdit.new()
 	_folder_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_folder_edit.text_changed.connect(_on_any_setting_changed)
+	_folder_edit.tooltip_text = "Folder scanned for meshes and scenes. Thumbnails load on demand so large libraries stay responsive."
 	var folder_btn := Button.new()
 	folder_btn.text = "Browse…"
+	folder_btn.tooltip_text = "Choose a project folder containing your assets."
 	folder_btn.pressed.connect(_on_pick_folder)
 	folder_row.add_child(_folder_edit)
 	folder_row.add_child(folder_btn)
@@ -197,6 +209,8 @@ func _build_ui() -> void:
 	fmt_btn_row.add_child(all_on)
 	fmt_btn_row.add_child(all_off)
 	_root_v.add_child(fmt_btn_row)
+	all_on.tooltip_text = "Show every file type in the list."
+	all_off.tooltip_text = "Hide every type; turn individual formats back on below."
 	var fmt_grid := GridContainer.new()
 	fmt_grid.columns = 3
 	for ext in EXTENSIONS:
@@ -210,6 +224,7 @@ func _build_ui() -> void:
 	_search = LineEdit.new()
 	_search.placeholder_text = "Filter by filename…"
 	_search.text_changed.connect(_on_search_changed)
+	_search.tooltip_text = "Filters the list by substring. Does not rescan disk."
 	_root_v.add_child(_search)
 	_browser = PlonkThumbnailBrowser.new()
 	_browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -217,7 +232,9 @@ func _build_ui() -> void:
 	_browser.custom_minimum_size = Vector2(0, 180 * editor_scale)
 	_browser.asset_selected.connect(_on_asset_selected)
 	_browser.asset_drag_started.connect(_on_asset_drag_started)
+	_browser.tooltip_text = "Click a card to pick; drag a card to place on mouse release in the viewport."
 	_root_v.add_child(_browser)
+	_add_section("Placement")
 	_add_label("Placement mode")
 	_mode_option = OptionButton.new()
 	_mode_option.add_item("Free", PlonkPlacementManager.Mode.FREE)
@@ -225,38 +242,45 @@ func _build_ui() -> void:
 	_mode_option.add_item("Surface", PlonkPlacementManager.Mode.SURFACE)
 	_mode_option.add_item("Vertex", PlonkPlacementManager.Mode.VERTEX)
 	_mode_option.item_selected.connect(_on_any_idx_changed)
+	_mode_option.tooltip_text = "Free: ground plane. Grid: XZ snap + overlay. Surface: ray onto physics. Vertex: corner snap to nearby mesh corners (see cyan line when it locks)."
 	_root_v.add_child(_mode_option)
 	_align_normal = CheckBox.new()
 	_align_normal.text = "Align to normal (surface mode)"
 	_align_normal.button_pressed = true
 	_align_normal.toggled.connect(_on_any_bool_changed)
+	_align_normal.tooltip_text = "When on, surface mode rotates the asset to sit flush on slopes."
 	_root_v.add_child(_align_normal)
 	_add_label("Rotation snap")
 	_snap_option = OptionButton.new()
 	for d in [1, 15, 45, 90]:
 		_snap_option.add_item("%d°" % d, d)
 	_snap_option.item_selected.connect(_on_any_idx_changed)
+	_snap_option.tooltip_text = "Step for rotation hotkeys while placing."
 	_root_v.add_child(_snap_option)
-	_grid_size = _add_spin("Grid size", 0.1, 100.0, 1.0)
-	_height_spin = _add_spin("Height offset", -1000.0, 1000.0, 0.1)
-	_layer_spin = _add_spin("Grid layer", -1000, 1000, 1)
-	_rand_y_min = _add_spin("Y rot min°", -360, 360, 1)
-	_rand_y_max = _add_spin("Y rot max°", -360, 360, 1)
-	_rand_tilt_x = _add_spin("Tilt X max°", 0, 180, 1)
-	_rand_tilt_z = _add_spin("Tilt Z max°", 0, 180, 1)
-	_rand_s_min = _add_spin("Scale min", 0.01, 100.0, 0.01)
-	_rand_s_max = _add_spin("Scale max", 0.01, 100.0, 0.01)
+	_grid_size = _add_spin("Grid size", 0.1, 100.0, 1.0, "Spacing for grid snap and overlay lines.")
+	_height_spin = _add_spin("Height offset", -1000.0, 1000.0, 0.1, "World Y of the placement plane in free/grid modes. Alt+scroll in the 3D view nudges this.")
+	_layer_spin = _add_spin("Grid layer", -1000, 1000, 1, "Offsets height by (layer × grid size) for stacked floors.")
+	_add_section("Randomisation")
+	_rand_y_min = _add_spin("Y rot min°", -360, 360, 1, "Random yaw range applied per stamp.")
+	_rand_y_max = _add_spin("Y rot max°", -360, 360, 1, "Random yaw range applied per stamp.")
+	_rand_tilt_x = _add_spin("Tilt X max°", 0, 180, 1, "Random tilt around X (degrees, ±).")
+	_rand_tilt_z = _add_spin("Tilt Z max°", 0, 180, 1, "Random tilt around Z (degrees, ±).")
+	_rand_s_min = _add_spin("Scale min", 0.01, 100.0, 0.01, "Uniform scale randomisation lower bound.")
+	_rand_s_max = _add_spin("Scale max", 0.01, 100.0, 0.01, "Uniform scale randomisation upper bound.")
+	_add_section("Paint & MultiMesh")
 	_paint_toggle = CheckBox.new()
 	_paint_toggle.text = "Paint mode"
 	_paint_toggle.toggled.connect(_on_any_bool_changed)
+	_paint_toggle.tooltip_text = "Hold left mouse in the viewport to stroke along the ghost path instead of single clicks."
 	_root_v.add_child(_paint_toggle)
-	_paint_space = _add_spin("Paint spacing", 0.01, 100.0, 1.0)
-	_scatter = _add_spin("Scatter radius", 0.0, 100.0, 0.1)
+	_paint_space = _add_spin("Paint spacing", 0.01, 100.0, 1.0, "Minimum distance between stamps along the stroke.")
+	_scatter = _add_spin("Scatter radius", 0.0, 100.0, 0.1, "Random XY offset around each stamp for organic scatter.")
 	_mm_toggle = CheckBox.new()
 	_mm_toggle.text = "MultiMesh paint"
 	_mm_toggle.toggled.connect(_on_any_bool_changed)
+	_mm_toggle.tooltip_text = "When paint is on, instances go into one MultiMeshInstance3D for fewer draw calls. Collision options below do not apply to MultiMesh instances (add collision separately if needed)."
 	_root_v.add_child(_mm_toggle)
-	_add_label("Collision")
+	_add_section("Collision")
 	_body_option = OptionButton.new()
 	_body_option.add_item("None", PlonkCollisionBuilder.BodyKind.NONE)
 	_body_option.add_item("StaticBody3D", PlonkCollisionBuilder.BodyKind.STATIC)
@@ -264,6 +288,7 @@ func _build_ui() -> void:
 	_body_option.add_item("CharacterBody3D", PlonkCollisionBuilder.BodyKind.CHARACTER)
 	_body_option.add_item("Area3D", PlonkCollisionBuilder.BodyKind.AREA)
 	_body_option.item_selected.connect(_on_any_idx_changed)
+	_body_option.tooltip_text = "Wraps each single placement in a physics body. Not used for MultiMesh paint (instances only)."
 	_root_v.add_child(_body_option)
 	_shape_option = OptionButton.new()
 	_shape_option.add_item("Trimesh", PlonkCollisionBuilder.ShapeKind.TRIMESH)
@@ -272,20 +297,32 @@ func _build_ui() -> void:
 	_shape_option.add_item("Sphere", PlonkCollisionBuilder.ShapeKind.SPHERE)
 	_shape_option.add_item("Capsule", PlonkCollisionBuilder.ShapeKind.CAPSULE)
 	_shape_option.item_selected.connect(_on_any_idx_changed)
+	_shape_option.tooltip_text = "Trimesh/convex from mesh; primitives are fast approximations."
 	_root_v.add_child(_shape_option)
-	_add_label("Material override (path to .tres/.res)")
+	_add_section("Material override")
 	_mat_edit = LineEdit.new()
 	_mat_edit.placeholder_text = "res://path/to/material.tres"
 	_mat_edit.text_changed.connect(_on_any_setting_changed)
+	_mat_edit.tooltip_text = "Optional material applied to mesh surfaces after place. Leave empty to use asset materials."
 	_root_v.add_child(_mat_edit)
 	_mat_mode = OptionButton.new()
 	_mat_mode.add_item("Replace", 0)
 	_mat_mode.add_item("Next Pass", 1)
 	_mat_mode.item_selected.connect(_on_any_idx_changed)
+	_mat_mode.tooltip_text = "Replace: override surface material. Next pass: chain as next_pass on a duplicated StandardMaterial3D."
 	_root_v.add_child(_mat_mode)
 
 
-func _add_spin(label: String, mn: Variant, mx: Variant, step: float) -> SpinBox:
+func _add_section(title: String) -> void:
+	var sep := HSeparator.new()
+	_root_v.add_child(sep)
+	var hl := Label.new()
+	hl.text = title
+	hl.add_theme_font_size_override("font_size", int((BASE_FONT_PX + 2) * editor_scale))
+	_root_v.add_child(hl)
+
+
+func _add_spin(label: String, mn: Variant, mx: Variant, step: float, tip: String = "") -> SpinBox:
 	var row := HBoxContainer.new()
 	var l := Label.new()
 	l.text = label
@@ -296,6 +333,8 @@ func _add_spin(label: String, mn: Variant, mx: Variant, step: float) -> SpinBox:
 	s.max_value = float(mx)
 	s.step = step
 	s.value_changed.connect(_on_any_float_changed)
+	if not tip.is_empty():
+		s.tooltip_text = tip
 	row.add_child(l)
 	row.add_child(s)
 	_root_v.add_child(row)

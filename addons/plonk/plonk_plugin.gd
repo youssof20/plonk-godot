@@ -81,6 +81,17 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 		return AFTER_GUI_INPUT_PASS
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.alt_pressed and (
+			mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN
+		):
+			var step := 0.05
+			if mb.shift_pressed:
+				step = 0.25
+			if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				step = -step
+			_dock.bump_height_offset(step)
+			_sync_from_dock()
+			return AFTER_GUI_INPUT_STOP
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if _dock.is_paint_enabled():
 				_paint_holding = mb.pressed
@@ -103,23 +114,33 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 	if not _placement_active or _last_camera == null:
 		return
-	if _dock.get_placement_mode() != PlonkPlacementManager.Mode.GRID:
-		return
-	var center := _pm.get_snapped_plane_position(_last_camera, _last_mouse)
-	var gs := _dock.get_grid_size()
-	var plane_y := _dock.get_height_offset() + float(_dock.get_grid_layer()) * gs
-	for i in range(-20, 21):
-		var x0 := Vector3(center.x + float(i) * gs, plane_y, center.z - 20.0 * gs)
-		var x1 := Vector3(center.x + float(i) * gs, plane_y, center.z + 20.0 * gs)
-		var p0 := _last_camera.unproject_position(x0)
-		var p1 := _last_camera.unproject_position(x1)
-		overlay.draw_line(p0, p1, Color(1, 1, 1, 0.3), 1.0)
-	for j in range(-20, 21):
-		var z0 := Vector3(center.x - 20.0 * gs, plane_y, center.z + float(j) * gs)
-		var z1 := Vector3(center.x + 20.0 * gs, plane_y, center.z + float(j) * gs)
-		var q0 := _last_camera.unproject_position(z0)
-		var q1 := _last_camera.unproject_position(z1)
-		overlay.draw_line(q0, q1, Color(1, 1, 1, 0.3), 1.0)
+	var mode := _dock.get_placement_mode()
+	if mode == PlonkPlacementManager.Mode.GRID:
+		var center := _pm.get_snapped_plane_position(_last_camera, _last_mouse)
+		var gs := _dock.get_grid_size()
+		var plane_y := _dock.get_height_offset() + float(_dock.get_grid_layer()) * gs
+		for i in range(-20, 21):
+			var x0 := Vector3(center.x + float(i) * gs, plane_y, center.z - 20.0 * gs)
+			var x1 := Vector3(center.x + float(i) * gs, plane_y, center.z + 20.0 * gs)
+			var p0 := _last_camera.unproject_position(x0)
+			var p1 := _last_camera.unproject_position(x1)
+			overlay.draw_line(p0, p1, Color(1, 1, 1, 0.3), 1.0)
+		for j in range(-20, 21):
+			var z0 := Vector3(center.x - 20.0 * gs, plane_y, center.z + float(j) * gs)
+			var z1 := Vector3(center.x + 20.0 * gs, plane_y, center.z + float(j) * gs)
+			var q0 := _last_camera.unproject_position(z0)
+			var q1 := _last_camera.unproject_position(z1)
+			overlay.draw_line(q0, q1, Color(1, 1, 1, 0.3), 1.0)
+	elif mode == PlonkPlacementManager.Mode.VERTEX:
+		var gz := _pm.get_last_vertex_gizmo()
+		if bool(gz.get("ok", false)):
+			var g0: Vector3 = gz.get("ghost_corner", Vector3.ZERO)
+			var g1: Vector3 = gz.get("scene_corner", Vector3.ZERO)
+			var pg0 := _last_camera.unproject_position(g0)
+			var pg1 := _last_camera.unproject_position(g1)
+			overlay.draw_line(pg0, pg1, Color(0.35, 0.92, 1.0, 0.9), 2.0)
+			overlay.draw_circle(pg0, 4.0, Color(0.3, 0.85, 1.0, 0.95))
+			overlay.draw_circle(pg1, 4.0, Color(0.35, 1.0, 0.45, 0.95))
 
 
 func _on_asset_selected(path: String) -> void:
