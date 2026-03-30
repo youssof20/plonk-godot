@@ -22,9 +22,11 @@ var _placement_seq:    int    = 0
 var _paint_holding:    bool   = false
 var _session_count:    int    = 0
 var _editor: EditorInterface
+var _dbg_heartbeat:    float  = 0.0  # seconds since last heartbeat print
 
 
 func _enter_tree() -> void:
+	print("[Plonk] _enter_tree — plugin loading")
 	_editor = get_editor_interface()
 	var dock_scene: PackedScene = load("res://addons/plonk/dock/plonk_dock.tscn") as PackedScene
 	_dock = dock_scene.instantiate() as PlonkDock
@@ -38,9 +40,13 @@ func _enter_tree() -> void:
 	if not _editor.scene_changed.is_connected(_on_scene_changed):
 		_editor.scene_changed.connect(_on_scene_changed)
 	set_process(true)
+	set_process_input(true)
+	print("[Plonk] _enter_tree — done")
 
 
 func _exit_tree() -> void:
+	print("[Plonk] _exit_tree")
+	set_process_input(false)
 	if _editor:
 		if _editor.scene_changed.is_connected(_on_scene_changed):
 			_editor.scene_changed.disconnect(_on_scene_changed)
@@ -52,7 +58,23 @@ func _exit_tree() -> void:
 		_dock = null
 
 
+func _input(event: InputEvent) -> void:
+	# Global catch-all — fires for clicks anywhere in the editor.
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			print("[Plonk] _input LMB anywhere — placement_active=", _placement_active)
+
+
 func _process(delta: float) -> void:
+	# Heartbeat: confirm _process is ticking (prints every 3 s).
+	_dbg_heartbeat += delta
+	if _dbg_heartbeat >= 3.0:
+		_dbg_heartbeat = 0.0
+		print("[Plonk] heartbeat — active=", _placement_active,
+			" asset='", _asset_path, "'",
+			" camera=", _last_camera != null,
+			" scene_root=", _editor.get_edited_scene_root())
 	if _dock and _dock.is_erase_mode():
 		_update_erase_banner()
 		return
@@ -69,15 +91,21 @@ func _process(delta: float) -> void:
 
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 	_last_camera = camera
+	# Debug: log every event type that reaches this function.
+	if event is InputEventMouseButton:
+		var _dbg := event as InputEventMouseButton
+		print("[Plonk] _forward_3d_gui_input MOUSE_BUTTON btn=", _dbg.button_index,
+			" pressed=", _dbg.pressed, " active=", _placement_active)
+	elif event is InputEventMouseMotion:
+		pass  # too noisy to log motion
+	elif event is InputEventKey:
+		print("[Plonk] _forward_3d_gui_input KEY keycode=", (event as InputEventKey).keycode)
+	else:
+		print("[Plonk] _forward_3d_gui_input OTHER event=", event.get_class())
 	# Update mouse position on ANY mouse event (clicks included).
 	if event is InputEventMouse:
 		_last_mouse = (event as InputEventMouse).position
 		update_overlays()
-	# Debug: log LMB presses so we can diagnose if input is reaching the plugin.
-	if event is InputEventMouseButton:
-		var _mb := event as InputEventMouseButton
-		if _mb.button_index == MOUSE_BUTTON_LEFT and _mb.pressed:
-			print("[Plonk] 3D LMB received — placement_active=", _placement_active, " erase=", _dock.is_erase_mode() if _dock else "no-dock")
 
 	# ── Erase mode: LMB erases nearest PlonkInst ──────────────────────────────
 	if _dock and _dock.is_erase_mode():
@@ -172,6 +200,7 @@ func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 
 
 func _on_asset_selected(path: String) -> void:
+	print("[Plonk] asset selected: ", path)
 	_asset_path      = path
 	_last_asset_path = path
 	_session_count   = 0
@@ -198,16 +227,21 @@ func _on_zoo_requested() -> void:
 
 
 func _begin_placement() -> void:
+	print("[Plonk] _begin_placement — asset='", _asset_path, "'")
 	var root := _editor.get_edited_scene_root()
 	if root == null:
+		print("[Plonk] _begin_placement FAIL: no open scene")
 		push_warning("Plonk: no open scene — open a scene first.")
 		return
+	print("[Plonk] _begin_placement — scene root: ", root, " (", root.get_class(), ")")
 	_placement_active = true
 	_ghost.spawn(root, _asset_path)
 	if not _ghost.has_ghost():
+		print("[Plonk] _begin_placement FAIL: ghost did not spawn")
 		push_warning("Plonk: could not spawn ghost for '%s'. Is it a valid PackedScene/GLB?" % _asset_path)
 		_placement_active = false
 		return
+	print("[Plonk] _begin_placement SUCCESS — placement_active=true, ghost spawned")
 	_sync_from_dock()
 	if _dock:
 		_dock.set_active_asset_path(_asset_path)
