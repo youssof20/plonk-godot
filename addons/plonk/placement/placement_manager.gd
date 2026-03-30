@@ -22,6 +22,10 @@ var user_euler_deg: Vector3 = Vector3.ZERO
 var user_scale: Vector3 = Vector3.ONE
 var flip_x: bool = false
 var flip_z: bool = false
+var flip_y: bool = false
+
+## Last surface hit normal (set during update_ghost in surface/vertex modes).
+var last_hit_normal: Vector3 = Vector3.UP
 
 ## Last vertex snap pair for viewport overlay (set during update_ghost in vertex mode).
 var _last_vertex_gizmo: Dictionary = { "ok": false }
@@ -93,6 +97,7 @@ func _transform_surface(
 		return _transform_free(camera, mouse_pos, fallback_plane_y)
 	var hit_pos: Vector3 = rc.position
 	var n: Vector3 = rc.normal
+	last_hit_normal = n
 	var basis: Basis
 	if align_to_normal:
 		var surf := PlonkModeSurface.basis_y_up(n)
@@ -136,6 +141,8 @@ func _with_flip_scale(t: Transform3D) -> Transform3D:
 	var s := user_scale
 	if flip_x:
 		s.x *= -1.0
+	if flip_y:
+		s.y *= -1.0
 	if flip_z:
 		s.z *= -1.0
 	var b := t.basis.scaled(s)

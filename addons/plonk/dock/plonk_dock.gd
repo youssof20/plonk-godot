@@ -9,6 +9,8 @@ signal folder_changed(path: String)
 signal dock_settings_changed
 signal zoo_requested
 signal placement_cancelled
+signal replace_selected_requested
+signal asset_pool_changed(paths: PackedStringArray)
 
 const EXTENSIONS: PackedStringArray = [
 	"glb", "gltf", "fbx", "obj", "dae", "blend", "tscn", "scn", "res", "mesh"
@@ -38,8 +40,10 @@ var _rand_tilt_z: SpinBox
 var _rand_s_min: SpinBox
 var _rand_s_max: SpinBox
 var _paint_toggle: CheckBox
+var _erase_toggle: CheckBox
 var _paint_space: SpinBox
 var _scatter: SpinBox
+var _max_slope: SpinBox
 var _mm_toggle: CheckBox
 var _body_option: OptionButton
 var _shape_option: OptionButton
@@ -128,6 +132,23 @@ func is_multimesh_enabled() -> bool:
 	return _mm_toggle.button_pressed and _paint_toggle.button_pressed
 
 
+func is_erase_mode() -> bool:
+	return _erase_toggle.button_pressed
+
+
+func set_erase_mode(on: bool) -> void:
+	if _erase_toggle:
+		_erase_toggle.button_pressed = on
+
+
+func get_max_slope_degrees() -> float:
+	return float(_max_slope.value)
+
+
+func get_asset_pool() -> PackedStringArray:
+	return _browser.get_pool_paths()
+
+
 func get_collision_body() -> int:
 	return _body_option.get_selected_id()
 
@@ -211,11 +232,20 @@ func _build_ui() -> void:
 	_parent_edit.text_changed.connect(_on_any_setting_changed)
 	_parent_edit.tooltip_text = "Empty or \".\" = scene root. Example: Props/Furniture places under that child node."
 	_root_v.add_child(_parent_edit)
+	var action_row := HBoxContainer.new()
 	var zoo_btn := Button.new()
-	zoo_btn.text = "Create Asset Zoo"
+	zoo_btn.text = "Asset Zoo"
+	zoo_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	zoo_btn.tooltip_text = "Arranges every scanned asset in a grid under the parent so you can compare scale and style at a glance."
 	zoo_btn.pressed.connect(func () -> void: zoo_requested.emit())
-	_root_v.add_child(zoo_btn)
+	var replace_btn := Button.new()
+	replace_btn.text = "Replace Selected"
+	replace_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	replace_btn.tooltip_text = "Replaces selected PlonkInst nodes in the scene tree with the currently picked asset, preserving transforms."
+	replace_btn.pressed.connect(func () -> void: replace_selected_requested.emit())
+	action_row.add_child(zoo_btn)
+	action_row.add_child(replace_btn)
+	_root_v.add_child(action_row)
 	_add_label("Asset folder")
 	var folder_row := HBoxContainer.new()
 	_folder_edit = LineEdit.new()
@@ -262,7 +292,8 @@ func _build_ui() -> void:
 	_browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_browser.custom_minimum_size = Vector2(0, 180 * editor_scale)
 	_browser.asset_selected.connect(_on_asset_selected)
-	_browser.tooltip_text = "Click a thumbnail to pick an asset, then click in the 3D view to place it."
+	_browser.asset_pool_changed.connect(_on_pool_changed)
+	_browser.tooltip_text = "Click a thumbnail to pick. Ctrl+click to add/remove from the paint pool (amber dot). With a pool, each stamp picks a random asset."
 	_root_v.add_child(_browser)
 	_add_section("Placement")
 	_add_label("Placement mode")
@@ -301,10 +332,17 @@ func _build_ui() -> void:
 	_paint_toggle = CheckBox.new()
 	_paint_toggle.text = "Paint mode"
 	_paint_toggle.toggled.connect(_on_any_bool_changed)
-	_paint_toggle.tooltip_text = "Hold left mouse in the viewport to stroke along the ghost path instead of single clicks."
+	_paint_toggle.tooltip_text = "Hold LMB in the viewport to stroke. Works with the pool — each stamp picks a random pooled asset."
 	_root_v.add_child(_paint_toggle)
+	_erase_toggle = CheckBox.new()
+	_erase_toggle.text = "Erase mode"
+	_erase_toggle.toggled.connect(_on_any_bool_changed)
+	_erase_toggle.tooltip_text = "LMB in the viewport deletes the nearest PlonkInst node within 2 m. Undoable. Paint and place are disabled while erasing."
+	_root_v.add_child(_erase_toggle)
 	_paint_space = _add_spin("Paint spacing", 0.01, 100.0, 1.0, "Minimum distance between stamps along the stroke.")
 	_scatter = _add_spin("Scatter radius", 0.0, 100.0, 0.1, "Random XY offset around each stamp for organic scatter.")
+	_max_slope = _add_spin("Max slope°", 0.0, 90.0, 1.0, "Steeper surfaces are skipped during paint/place. 90 = accept any slope (default). Useful to avoid stamping on walls.")
+	_max_slope.value = 90.0
 	_mm_toggle = CheckBox.new()
 	_mm_toggle.text = "MultiMesh paint"
 	_mm_toggle.toggled.connect(_on_any_bool_changed)
@@ -460,19 +498,31 @@ func _on_asset_selected(path: String) -> void:
 	asset_selected.emit(path)
 
 
+func _on_pool_changed(paths: PackedStringArray) -> void:
+	asset_pool_changed.emit(paths)
+
+
 ## Updates the browser highlight for the active asset path.
 func set_active_asset_path(path: String) -> void:
 	if _browser:
 		_browser.set_active_path(path)
 
 
-## Shows or hides the status banner. Pass empty string to clear (hide).
-func set_placement_status(asset_name: String, is_paint: bool) -> void:
-	if asset_name.is_empty():
+## Shows or hides the status banner. Pass empty asset_name to clear/hide.
+func set_placement_status(asset_name: String, is_paint: bool, is_erase: bool = false, count: int = 0) -> void:
+	if asset_name.is_empty() and not is_erase:
 		_status_bar.visible = false
 		return
-	var mode_hint := " — hold LMB to paint" if is_paint else " — click scene to place, RMB/ESC to cancel"
-	_status_label.text = "Placing: %s%s" % [asset_name, mode_hint]
+	var text: String
+	if is_erase:
+		text = "Erase mode — LMB near a placed asset to remove it. ESC to exit."
+	elif is_paint:
+		text = "Paint: %s — hold LMB to stroke" % asset_name
+	else:
+		text = "Placing: %s — click scene to stamp, RMB/ESC to stop" % asset_name
+	if count > 0:
+		text += "  [%d]" % count
+	_status_label.text = text
 	_status_bar.visible = true
 
 
@@ -508,7 +558,7 @@ func _load_settings_into_ui() -> void:
 			cb.button_pressed = bool(fmt[ext])
 	var card := PlonkSettingsManager.get_float(PlonkSettingsManager.KEY_CARD_SIZE, BASE_CARD_PX * editor_scale)
 	_browser.set_card_size(card)
-	_set_mode_select(PlonkSettingsManager.get_int(PlonkSettingsManager.KEY_PLACEMENT_MODE, PlonkPlacementManager.Mode.FREE))
+	_set_mode_select(PlonkSettingsManager.get_int(PlonkSettingsManager.KEY_PLACEMENT_MODE, PlonkPlacementManager.Mode.SURFACE))
 	var snap := PlonkSettingsManager.get_int(PlonkSettingsManager.KEY_ROTATION_SNAP, 15)
 	_select_snap(snap)
 	_select_option_id(_body_option, PlonkSettingsManager.get_int(PlonkSettingsManager.KEY_COLLISION_BODY, PlonkCollisionBuilder.BodyKind.NONE))

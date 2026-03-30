@@ -4,6 +4,7 @@ extends EditorPlugin
 
 
 const PLACEMENT_NAME_PREFIX := "PlonkInst_"
+const ERASE_RADIUS          := 2.0     # metres — erase hits within this distance
 
 var _dock: PlonkDock
 var _ghost: PlonkGhostController = PlonkGhostController.new()
@@ -11,12 +12,15 @@ var _pm: PlonkPlacementManager = PlonkPlacementManager.new()
 var _paint: PlonkPaintTool = PlonkPaintTool.new()
 var _mm: PlonkMultiMeshPainter = PlonkMultiMeshPainter.new()
 
-var _placement_active: bool  = false
+var _placement_active: bool   = false
 var _asset_path:       String = ""
+var _last_asset_path:  String = ""   # for Space key re-pick
+var _asset_pool:       PackedStringArray = []
 var _last_camera:      Camera3D
 var _last_mouse:       Vector2 = Vector2.ZERO
-var _placement_seq:    int  = 0
-var _paint_holding:    bool  = false
+var _placement_seq:    int    = 0
+var _paint_holding:    bool   = false
+var _session_count:    int    = 0
 var _editor: EditorInterface
 
 
@@ -29,6 +33,8 @@ func _enter_tree() -> void:
 	_dock.zoo_requested.connect(_on_zoo_requested)
 	_dock.dock_settings_changed.connect(_sync_from_dock)
 	_dock.placement_cancelled.connect(_end_placement)
+	_dock.replace_selected_requested.connect(_replace_selected)
+	_dock.asset_pool_changed.connect(_on_pool_changed)
 	if not _editor.scene_changed.is_connected(_on_scene_changed):
 		_editor.scene_changed.connect(_on_scene_changed)
 	set_process(true)
@@ -47,6 +53,9 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
+	if _dock and _dock.is_erase_mode():
+		_update_erase_banner()
+		return
 	if not _placement_active or _last_camera == null:
 		return
 	_sync_from_dock()
@@ -63,10 +72,26 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 	_last_camera = camera
 	if event is InputEventMouseMotion:
 		_last_mouse = event.position
+		update_overlays()
+
+	# ── Erase mode: LMB erases nearest PlonkInst ──────────────────────────────
+	if _dock and _dock.is_erase_mode():
+		if event is InputEventMouseButton:
+			var mb := event as InputEventMouseButton
+			if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+				_erase_at_mouse(camera)
+				return AFTER_GUI_INPUT_STOP
+			if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+				_dock.set_erase_mode(false)
+				return AFTER_GUI_INPUT_STOP
+		return AFTER_GUI_INPUT_PASS
+
 	if not _placement_active:
 		return AFTER_GUI_INPUT_PASS
+
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		# Alt+scroll: nudge height offset
 		if mb.pressed and mb.alt_pressed and (
 			mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN
 		):
@@ -78,17 +103,21 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 			_dock.bump_height_offset(step)
 			_sync_from_dock()
 			return AFTER_GUI_INPUT_STOP
+
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if _dock.is_paint_enabled():
 				_paint_holding = mb.pressed
 				if mb.pressed:
 					_stamp_paint_or_place()
 			elif mb.pressed:
-				_commit_placement()
+				# Alt+click: place AND select the new node.
+				_commit_placement(mb.alt_pressed)
 			return AFTER_GUI_INPUT_STOP
+
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_end_placement()
 			return AFTER_GUI_INPUT_STOP
+
 	if event is InputEventKey and event.pressed:
 		if _handle_hotkey(event as InputEventKey):
 			return AFTER_GUI_INPUT_STOP
@@ -96,25 +125,35 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 
 
 func _forward_3d_draw_over_viewport(overlay: Control) -> void:
+	# Erase mode overlay: red circle around cursor on the ground plane
+	if _dock and _dock.is_erase_mode() and _last_camera != null:
+		var plane_y := _dock.get_height_offset()
+		var hit := PlonkModeFree.intersect_plane(_last_camera, _last_mouse, plane_y)
+		if bool(hit.get("ok", false)):
+			var world_pos: Vector3 = hit.position
+			var screen_pos := _last_camera.unproject_position(world_pos)
+			# Approximate screen radius from world radius (rough but fine for a brush indicator)
+			var edge_world := world_pos + _last_camera.global_transform.basis.x * ERASE_RADIUS
+			var edge_screen := _last_camera.unproject_position(edge_world)
+			var screen_r := screen_pos.distance_to(edge_screen)
+			overlay.draw_arc(screen_pos, max(screen_r, 6.0), 0.0, TAU, 32, Color(1.0, 0.2, 0.2, 0.8), 2.0)
+		return
+
 	if not _placement_active or _last_camera == null:
 		return
 	var mode := _dock.get_placement_mode()
 	if mode == PlonkPlacementManager.Mode.GRID:
 		var center := _pm.get_snapped_plane_position(_last_camera, _last_mouse)
 		var gs := _dock.get_grid_size()
-		var plane_y := _dock.get_height_offset() + float(_dock.get_grid_layer()) * gs
+		var plane_y2 := _dock.get_height_offset() + float(_dock.get_grid_layer()) * gs
 		for i in range(-20, 21):
-			var x0 := Vector3(center.x + float(i) * gs, plane_y, center.z - 20.0 * gs)
-			var x1 := Vector3(center.x + float(i) * gs, plane_y, center.z + 20.0 * gs)
-			var p0 := _last_camera.unproject_position(x0)
-			var p1 := _last_camera.unproject_position(x1)
-			overlay.draw_line(p0, p1, Color(1, 1, 1, 0.3), 1.0)
+			var x0 := Vector3(center.x + float(i) * gs, plane_y2, center.z - 20.0 * gs)
+			var x1 := Vector3(center.x + float(i) * gs, plane_y2, center.z + 20.0 * gs)
+			overlay.draw_line(_last_camera.unproject_position(x0), _last_camera.unproject_position(x1), Color(1, 1, 1, 0.3), 1.0)
 		for j in range(-20, 21):
-			var z0 := Vector3(center.x - 20.0 * gs, plane_y, center.z + float(j) * gs)
-			var z1 := Vector3(center.x + 20.0 * gs, plane_y, center.z + float(j) * gs)
-			var q0 := _last_camera.unproject_position(z0)
-			var q1 := _last_camera.unproject_position(z1)
-			overlay.draw_line(q0, q1, Color(1, 1, 1, 0.3), 1.0)
+			var z0 := Vector3(center.x - 20.0 * gs, plane_y2, center.z + float(j) * gs)
+			var z1 := Vector3(center.x + 20.0 * gs, plane_y2, center.z + float(j) * gs)
+			overlay.draw_line(_last_camera.unproject_position(z0), _last_camera.unproject_position(z1), Color(1, 1, 1, 0.3), 1.0)
 	elif mode == PlonkPlacementManager.Mode.VERTEX:
 		var gz := _pm.get_last_vertex_gizmo()
 		if bool(gz.get("ok", false)):
@@ -128,12 +167,18 @@ func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 
 
 func _on_asset_selected(path: String) -> void:
-	_asset_path    = path
+	_asset_path      = path
+	_last_asset_path = path
+	_session_count   = 0
 	_begin_placement()
 
 
 func _on_scene_changed() -> void:
 	_end_placement()
+
+
+func _on_pool_changed(paths: PackedStringArray) -> void:
+	_asset_pool = paths
 
 
 func _on_zoo_requested() -> void:
@@ -144,10 +189,7 @@ func _on_zoo_requested() -> void:
 	if parent == null:
 		parent = root
 	var paths := _dock.get_scanned_paths()
-	var spacing := 2.0
-	PlonkAssetZoo.build_zoo(parent, paths, spacing, func (p: String) -> bool:
-		return true
-	)
+	PlonkAssetZoo.build_zoo(parent, paths, 2.0, func (_p: String) -> bool: return true)
 
 
 func _begin_placement() -> void:
@@ -159,7 +201,7 @@ func _begin_placement() -> void:
 	_sync_from_dock()
 	if _dock:
 		_dock.set_active_asset_path(_asset_path)
-		_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled())
+		_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled(), false, _session_count)
 
 
 func _end_placement() -> void:
@@ -169,6 +211,11 @@ func _end_placement() -> void:
 	_ghost.clear()
 	if _dock:
 		_dock.set_placement_status("", false)
+
+
+func _update_erase_banner() -> void:
+	if _dock:
+		_dock.set_placement_status("", false, true)
 
 
 func _sync_from_dock() -> void:
@@ -181,12 +228,47 @@ func _sync_from_dock() -> void:
 	_paint.spacing = _dock.get_paint_spacing()
 	_paint.scatter_radius = _dock.get_scatter_radius()
 	if _placement_active and _dock:
-		_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled())
+		_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled(), false, _session_count)
 
+
+# ── Slope filter ───────────────────────────────────────────────────────────────
+
+func _passes_slope_filter() -> bool:
+	var max_deg := _dock.get_max_slope_degrees()
+	if max_deg >= 89.9:
+		return true
+	var angle := rad_to_deg(acos(clampf(_pm.last_hit_normal.dot(Vector3.UP), -1.0, 1.0)))
+	return angle <= max_deg
+
+
+# ── Pool / random asset selection ─────────────────────────────────────────────
+
+func _get_stamp_asset() -> String:
+	if _asset_pool.size() > 1:
+		return _asset_pool[randi() % _asset_pool.size()]
+	return _asset_path
+
+
+## After stamping with a pool, re-seed the ghost to a new random asset.
+func _reseed_ghost_from_pool() -> void:
+	if _asset_pool.size() <= 1:
+		return
+	var next := _asset_pool[randi() % _asset_pool.size()]
+	var root := _editor.get_edited_scene_root()
+	if root:
+		_ghost.spawn(root, next)
+
+
+# ── Hotkeys ───────────────────────────────────────────────────────────────────
 
 func _handle_hotkey(ev: InputEventKey) -> bool:
 	if ev.keycode == PlonkKeyBindings.get_keycode(PlonkKeyBindings.ACTION_CANCEL):
 		_end_placement()
+		return true
+	# Space: re-pick last used asset when nothing is active
+	if ev.keycode == KEY_SPACE and not _placement_active and not _last_asset_path.is_empty():
+		_asset_path = _last_asset_path
+		_begin_placement()
 		return true
 	var snap := _dock.get_rotation_snap_degrees()
 	var shift := ev.shift_pressed
@@ -230,6 +312,7 @@ func _handle_hotkey(ev: InputEventKey) -> bool:
 		_pm.user_euler_deg = Vector3.ZERO
 		_pm.user_scale = Vector3.ONE
 		_pm.flip_x = false
+		_pm.flip_y = false
 		_pm.flip_z = false
 		return true
 	return false
@@ -247,11 +330,15 @@ func _apply_continuous_keys(delta: float) -> void:
 		_pm.user_euler_deg.y -= snap * delta * 4.0
 
 
-func _commit_placement() -> void:
+# ── Placement ─────────────────────────────────────────────────────────────────
+
+func _commit_placement(select_after: bool = false) -> void:
 	if not _ghost.has_ghost():
 		return
 	var root := _editor.get_edited_scene_root() as Node3D
 	if root == null:
+		return
+	if not _passes_slope_filter():
 		return
 	var parent := _resolve_parent_node()
 	if parent == null:
@@ -261,10 +348,14 @@ func _commit_placement() -> void:
 		return
 	var xf := gr.global_transform
 	xf = _apply_randomisation(xf)
+	var stamp_path := _get_stamp_asset()
+	_session_count += 1
 	if _dock.is_multimesh_enabled():
-		_place_multimesh(parent as Node3D, xf)
+		_place_multimesh(parent as Node3D, xf, stamp_path)
 	else:
-		_place_node_undoable(parent, xf)
+		_place_node_undoable(parent, xf, stamp_path, select_after)
+	_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled(), false, _session_count)
+	_reseed_ghost_from_pool()
 
 
 func _stamp_paint_or_place() -> void:
@@ -272,6 +363,8 @@ func _stamp_paint_or_place() -> void:
 		return
 	var root := _editor.get_edited_scene_root() as Node3D
 	if root == null:
+		return
+	if not _passes_slope_filter():
 		return
 	var parent := _resolve_parent_node()
 	if parent == null:
@@ -287,10 +380,14 @@ func _stamp_paint_or_place() -> void:
 	var xf := gr2.global_transform
 	xf.origin = pos
 	xf = _apply_randomisation(xf)
+	var stamp_path := _get_stamp_asset()
+	_session_count += 1
 	if _dock.is_multimesh_enabled():
-		_place_multimesh(parent as Node3D, xf)
+		_place_multimesh(parent as Node3D, xf, stamp_path)
 	else:
-		_place_node_undoable(parent, xf)
+		_place_node_undoable(parent, xf, stamp_path)
+	_dock.set_placement_status(_asset_path.get_file(), _dock.is_paint_enabled(), false, _session_count)
+	_reseed_ghost_from_pool()
 
 
 func _apply_randomisation(base: Transform3D) -> Transform3D:
@@ -317,8 +414,7 @@ func _resolve_parent_node() -> Node:
 	return n if n else root
 
 
-func _place_node_undoable(parent: Node, xf: Transform3D) -> void:
-	var path := _asset_path
+func _place_node_undoable(parent: Node, xf: Transform3D, asset_path: String, select_after: bool = false) -> void:
 	var body := _dock.get_collision_body()
 	var shape := _dock.get_collision_shape()
 	var edited := _editor.get_edited_scene_root()
@@ -329,7 +425,7 @@ func _place_node_undoable(parent: Node, xf: Transform3D) -> void:
 	_placement_seq += 1
 	var pid := _placement_seq
 	ur.create_action("Plonk Place")
-	ur.add_do_method(self, "_do_place", path, parent_rel, xf, body, shape, pid)
+	ur.add_do_method(self, "_do_place", asset_path, parent_rel, xf, body, shape, pid, select_after)
 	ur.add_undo_method(self, "_undo_place", parent_rel, pid)
 	ur.commit_action()
 
@@ -340,7 +436,8 @@ func _do_place(
 	xf: Transform3D,
 	body_kind: int,
 	shape_kind: int,
-	pid: int
+	pid: int,
+	select_after: bool
 ) -> void:
 	var edited := _editor.get_edited_scene_root()
 	if edited == null:
@@ -361,8 +458,7 @@ func _do_place(
 	inst.name = "PlonkVisual"
 	inst.global_transform = xf
 	var wrapped := PlonkCollisionBuilder.wrap(
-		inst,
-		parent,
+		inst, parent,
 		body_kind as PlonkCollisionBuilder.BodyKind,
 		shape_kind as PlonkCollisionBuilder.ShapeKind
 	)
@@ -370,6 +466,13 @@ func _do_place(
 	if edited:
 		_set_owner_recursive(wrapped, edited)
 	_apply_material_override(wrapped)
+	if select_after:
+		call_deferred("_select_node", wrapped)
+
+
+func _select_node(n: Node) -> void:
+	_editor.get_selection().clear()
+	_editor.get_selection().add_node(n)
 
 
 func _undo_place(parent_rel: NodePath, pid: int) -> void:
@@ -416,8 +519,10 @@ func _apply_material_override(root: Node) -> void:
 					m.set_surface_override_material(s, dup)
 
 
-func _place_multimesh(parent: Node3D, xf: Transform3D) -> void:
-	var res: Resource = load(_asset_path)
+# ── MultiMesh ─────────────────────────────────────────────────────────────────
+
+func _place_multimesh(parent: Node3D, xf: Transform3D, asset_path: String) -> void:
+	var res: Resource = load(asset_path)
 	if res == null or not (res is PackedScene):
 		return
 	var tmp := (res as PackedScene).instantiate() as Node3D
@@ -468,3 +573,102 @@ func _undo_mm_pop(mmi_path: NodePath) -> void:
 	if mm.instance_count <= 0:
 		return
 	mm.instance_count = mm.instance_count - 1
+
+
+# ── Erase ─────────────────────────────────────────────────────────────────────
+
+func _erase_at_mouse(camera: Camera3D) -> void:
+	var root := _editor.get_edited_scene_root()
+	if root == null:
+		return
+	var space := camera.get_world_3d().direct_space_state
+	var hit := PlonkModeSurface.raycast(space, camera, _last_mouse, 0xFFFFFFFF)
+	var cursor_pos: Vector3
+	if bool(hit.get("ok", false)):
+		cursor_pos = hit.position
+	else:
+		var ph := PlonkModeFree.intersect_plane(camera, _last_mouse, _dock.get_height_offset())
+		if not bool(ph.get("ok", false)):
+			return
+		cursor_pos = ph.position
+	var best_node: Node3D = null
+	var best_dist := ERASE_RADIUS
+	_find_nearest_plonk(root, cursor_pos, best_dist, best_node)
+	if best_node == null:
+		return
+	_erase_node_undoable(best_node)
+
+
+func _find_nearest_plonk(node: Node, pos: Vector3, inout_dist: float, inout_node: Node3D) -> void:
+	if node is Node3D and node.name.begins_with(PLACEMENT_NAME_PREFIX):
+		var d := (node as Node3D).global_position.distance_to(pos)
+		if d < inout_dist:
+			inout_dist = d
+			inout_node = node as Node3D
+	for c in node.get_children():
+		_find_nearest_plonk(c, pos, inout_dist, inout_node)
+
+
+func _erase_node_undoable(target: Node3D) -> void:
+	var edited := _editor.get_edited_scene_root()
+	if edited == null:
+		return
+	var node_path := edited.get_path_to(target)
+	var parent_path := edited.get_path_to(target.get_parent())
+	var ur := get_undo_redo()
+	ur.create_action("Plonk Erase")
+	ur.add_do_method(self, "_do_erase", node_path)
+	ur.add_undo_method(self, "_undo_erase_restore", parent_path, target)
+	ur.commit_action()
+
+
+func _do_erase(node_path: NodePath) -> void:
+	var edited := _editor.get_edited_scene_root()
+	if edited == null:
+		return
+	var n := edited.get_node_or_null(node_path)
+	if n:
+		n.queue_free()
+
+
+func _undo_erase_restore(parent_path: NodePath, node: Node3D) -> void:
+	var edited := _editor.get_edited_scene_root()
+	if edited == null:
+		return
+	var parent := edited.get_node_or_null(parent_path)
+	if parent == null:
+		return
+	parent.add_child(node)
+	_set_owner_recursive(node, edited)
+
+
+# ── Replace selected ───────────────────────────────────────────────────────────
+
+func _replace_selected() -> void:
+	if _asset_path.is_empty():
+		return
+	var edited := _editor.get_edited_scene_root()
+	if edited == null:
+		return
+	var sel := _editor.get_selection().get_selected_nodes()
+	if sel.is_empty():
+		return
+	var body := _dock.get_collision_body()
+	var shape := _dock.get_collision_shape()
+	for node in sel:
+		if not (node is Node3D):
+			continue
+		var n := node as Node3D
+		var parent_path := edited.get_path_to(n.get_parent())
+		var xf := n.global_transform
+		var node_path := edited.get_path_to(n)
+		var ur := get_undo_redo()
+		_placement_seq += 1
+		var pid := _placement_seq
+		ur.create_action("Plonk Replace")
+		ur.add_do_method(self, "_do_erase", node_path)
+		ur.add_do_method(self, "_do_place", _asset_path,
+			parent_path, xf, body, shape, pid, false)
+		ur.add_undo_method(self, "_undo_place", parent_path, pid)
+		ur.add_undo_method(self, "_undo_erase_restore", parent_path, n)
+		ur.commit_action()

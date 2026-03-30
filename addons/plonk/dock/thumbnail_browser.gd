@@ -2,9 +2,11 @@
 class_name PlonkThumbnailBrowser
 extends ScrollContainer
 ## Scrollable, auto-column grid of asset cards with throttled EditorResourcePreview.
+## Ctrl+click cards to build a multi-asset paint pool (amber dot indicator).
 
 
 signal asset_selected(path: String)
+signal asset_pool_changed(paths: PackedStringArray)
 
 const PREVIEW_MAX_IN_FLIGHT := 4
 const PREVIEW_RETRY_MAX     := 4
@@ -15,6 +17,7 @@ var _grid:             GridContainer
 var _cards:            Dictionary = {}   # id -> PlonkThumbnailCard
 var _path_by_id:       Dictionary = {}
 var _active_id:        String     = ""
+var _pool_ids:         Dictionary = {}   # id -> true  (pool membership)
 var _preview_inflight: int        = 0
 var _preview_backlog:  Array[Dictionary] = []
 var _card_size_px:     float      = 96.0
@@ -43,6 +46,7 @@ func set_paths(paths: PackedStringArray) -> void:
 		c.queue_free()
 	_cards.clear()
 	_path_by_id.clear()
+	_pool_ids.clear()
 	_preview_backlog.clear()
 	_preview_inflight = 0
 	_active_id = ""
@@ -53,11 +57,21 @@ func set_paths(paths: PackedStringArray) -> void:
 		var card := PlonkThumbnailCard.new()
 		card.configure(id, p, _card_size_px)
 		card.card_pressed.connect(_on_card_pressed)
+		card.card_pool_toggled.connect(_on_card_pool_toggled)
 		_grid.add_child(card)
 		_cards[id] = card
 		_preview_backlog.append({ "id": id, "path": p, "retries": 0 })
 		i += 1
 	_update_columns()
+
+
+## Returns all paths currently in the paint pool.
+func get_pool_paths() -> PackedStringArray:
+	var out := PackedStringArray()
+	for id in _pool_ids.keys():
+		if _path_by_id.has(id):
+			out.append(_path_by_id[id] as String)
+	return out
 
 
 ## Filters visible cards by filename substring.
@@ -141,6 +155,20 @@ func _on_card_pressed(card_id: String) -> void:
 	var path: String = _path_by_id[card_id]
 	set_active_path(path)
 	asset_selected.emit(path)
+
+
+func _on_card_pool_toggled(card_id: String, pooled: bool) -> void:
+	if not _path_by_id.has(card_id):
+		return
+	var card := _cards.get(card_id, null) as PlonkThumbnailCard
+	if card == null:
+		return
+	if pooled:
+		_pool_ids[card_id] = true
+	else:
+		_pool_ids.erase(card_id)
+	card.set_pooled(pooled)
+	asset_pool_changed.emit(get_pool_paths())
 
 
 func _gui_input(event: InputEvent) -> void:
