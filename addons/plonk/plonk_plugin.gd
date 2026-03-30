@@ -11,12 +11,13 @@ var _pm: PlonkPlacementManager = PlonkPlacementManager.new()
 var _paint: PlonkPaintTool = PlonkPaintTool.new()
 var _mm: PlonkMultiMeshPainter = PlonkMultiMeshPainter.new()
 
-var _placement_active: bool = false
-var _asset_path: String = ""
-var _last_camera: Camera3D
-var _last_mouse: Vector2 = Vector2.ZERO
-var _placement_seq: int = 0
-var _paint_holding: bool = false
+var _placement_active: bool  = false
+var _drag_placing:     bool  = false  # true when placement was started by dragging a card
+var _asset_path:       String = ""
+var _last_camera:      Camera3D
+var _last_mouse:       Vector2 = Vector2.ZERO
+var _placement_seq:    int  = 0
+var _paint_holding:    bool  = false
 var _editor: EditorInterface
 
 
@@ -72,10 +73,16 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 				if mb.pressed:
 					_stamp_paint_or_place()
 			else:
-				if mb.pressed:
+				if mb.pressed and not _drag_placing:
+					# Normal click → place on press
+					_commit_placement()
+				elif not mb.pressed and _drag_placing:
+					# Drag-and-drop → place on release
+					_drag_placing = false
 					_commit_placement()
 			return AFTER_GUI_INPUT_STOP
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			_drag_placing = false
 			_end_placement()
 			return AFTER_GUI_INPUT_STOP
 	if event is InputEventKey and event.pressed:
@@ -107,7 +114,14 @@ func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 
 
 func _on_asset_selected(path: String) -> void:
-	_asset_path = path
+	_asset_path    = path
+	_drag_placing  = false
+	_begin_placement()
+
+
+func _on_asset_drag_started(path: String) -> void:
+	_asset_path    = path
+	_drag_placing  = true
 	_begin_placement()
 
 
@@ -136,11 +150,14 @@ func _begin_placement() -> void:
 	_placement_active = true
 	_ghost.spawn(root, _asset_path)
 	_sync_from_dock()
+	if _dock:
+		_dock._browser.set_active_path(_asset_path)
 
 
 func _end_placement() -> void:
 	_placement_active = false
-	_paint_holding = false
+	_drag_placing     = false
+	_paint_holding    = false
 	_paint.end_stroke()
 	_ghost.clear()
 

@@ -215,6 +215,7 @@ func _build_ui() -> void:
 	_browser.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_browser.custom_minimum_size = Vector2(0, 180 * editor_scale)
 	_browser.asset_selected.connect(_on_asset_selected)
+	_browser.asset_drag_started.connect(_on_asset_drag_started)
 	_root_v.add_child(_browser)
 	_add_label("Placement mode")
 	_mode_option = OptionButton.new()
@@ -281,7 +282,6 @@ func _build_ui() -> void:
 	_mat_mode.add_item("Next Pass", 1)
 	_mat_mode.item_selected.connect(_on_any_idx_changed)
 	_root_v.add_child(_mat_mode)
-	gui_input.connect(_on_gui_input)
 
 
 func _add_spin(label: String, mn: Variant, mx: Variant, step: float) -> SpinBox:
@@ -390,19 +390,9 @@ func _on_asset_selected(path: String) -> void:
 	asset_selected.emit(path)
 
 
-func _on_gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.ctrl_pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_adjust_card_size(4.0 * editor_scale)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_adjust_card_size(-4.0 * editor_scale)
-
-
-func _adjust_card_size(delta: float) -> void:
-	var v := PlonkSettingsManager.get_float(PlonkSettingsManager.KEY_CARD_SIZE, BASE_CARD_PX * editor_scale)
-	v = clampf(v + delta, 60.0 * editor_scale, 160.0 * editor_scale)
-	PlonkSettingsManager.set_float(PlonkSettingsManager.KEY_CARD_SIZE, v)
-	_browser.set_card_size(v)
+func _on_asset_drag_started(path: String) -> void:
+	# Treated exactly like a click — ghost appears immediately and follows cursor.
+	asset_selected.emit(path)
 
 
 func _all_formats(on: bool) -> void:
