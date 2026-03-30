@@ -70,8 +70,9 @@ func _process(delta: float) -> void:
 
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 	_last_camera = camera
-	if event is InputEventMouseMotion:
-		_last_mouse = event.position
+	# Update mouse position on ANY mouse event (clicks included).
+	if event is InputEventMouse:
+		_last_mouse = (event as InputEventMouse).position
 		update_overlays()
 
 	# ── Erase mode: LMB erases nearest PlonkInst ──────────────────────────────
@@ -195,9 +196,14 @@ func _on_zoo_requested() -> void:
 func _begin_placement() -> void:
 	var root := _editor.get_edited_scene_root()
 	if root == null:
+		push_warning("Plonk: no open scene — open a scene first.")
 		return
 	_placement_active = true
 	_ghost.spawn(root, _asset_path)
+	if not _ghost.has_ghost():
+		push_warning("Plonk: could not spawn ghost for '%s'. Is it a valid PackedScene/GLB?" % _asset_path)
+		_placement_active = false
+		return
 	_sync_from_dock()
 	if _dock:
 		_dock.set_active_asset_path(_asset_path)
@@ -333,10 +339,16 @@ func _apply_continuous_keys(delta: float) -> void:
 # ── Placement ─────────────────────────────────────────────────────────────────
 
 func _commit_placement(select_after: bool = false) -> void:
-	if not _ghost.has_ghost():
+	var root_node := _editor.get_edited_scene_root()
+	if root_node == null:
 		return
-	var root := _editor.get_edited_scene_root() as Node3D
-	if root == null:
+	# Force a ghost position update right now — _process may not have ticked yet
+	# (e.g. first click after picking an asset without moving the mouse first).
+	if _last_camera != null:
+		var root3 := root_node as Node3D
+		if root3:
+			_pm.update_ghost(_ghost, _last_camera, _last_mouse, root3)
+	if not _ghost.has_ghost():
 		return
 	if not _passes_slope_filter():
 		return
